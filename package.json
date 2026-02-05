@@ -1,6 +1,6 @@
 {
   "name": "strapi-provider-upload-local-secure",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Strapi v5 local upload with path/pathDir organization, private folder (JWT/HMAC URLs), multi-upload, robust delete, and optional empty-dir cleanup.",
   "keywords": [
     "file",

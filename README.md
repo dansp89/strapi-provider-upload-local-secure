@@ -8,27 +8,10 @@
 
 ![Media Library with path organization](screenshot.png)
 
-**Enhanced fork** of the default Strapi local upload provider with:
-- Admin folder support (`data.path`)
-- Filesystem subdirectory support (`data.pathDir`, NFD + sanitized)
-- Robust deletion (main file + formats) even when Strapi provides partial metadata
+Enhanced fork of the default Strapi local upload provider. README targets v1.0.0 behavior.
 
 > **README targets v1.0.0 behavior** (this package’s current version).
 
-> **This is a modified version** of the official `@strapi/provider-upload-local` with additional features for better file organization.
-
-## ✨ What's Different from the Original
-
-This provider extends the original local provider with **two independent concepts**:
-
-- ✅ **Admin folders (Media Library)** via `data.path` (creates folder hierarchy in the DB and assigns `fileInfo.folder`)
-- ✅ **Filesystem directories** via `data.pathDir` (NFD normalized + sanitized)
-- ✅ **Multi-upload** support (`files: []` + `fileInfo: []`)
-- ✅ **Replace compatibility** (`upload.replace(...)` is also patched when available)
-- ✅ **Robust delete**: deletes the main file even if Strapi does not provide `ext/path` consistently
-- ✅ **Optional cleanup** of empty directories after deletion
-- ✅ **Backward compatibility**: if `pathDir` is missing, `path` can also be used as filesystem directory (configurable)
-- ✅ **Private folder** with **secure URLs**: JWT or HMAC-signed time-limited URLs (`?token=...&expires=...`) for access control
 
 ## 🚀 Features
 
@@ -169,7 +152,102 @@ To use `path`, `pathDir`, or `private`, you must call the upload service from yo
 
 **Custom route example:** For a full example with controller, custom route, Swagger and permissions, see [Custom route with path, pathDir and private](https://github.com/dansp89/strapi-provider-upload-local-secure/blob/main/docs/NATIVE_UPLOAD_PATH_AND_SWAGGER.md).
 
+### Optional: Swagger documentation with strapi-swagger-custom-paths
+
+If you want to expose your custom upload routes in the API documentation (Swagger/OpenAPI), you can use [strapi-swagger-custom-paths](https://www.npmjs.com/package/strapi-swagger-custom-paths). **No dependency between packages** — this provider works standalone; the Swagger package is an optional extra for developers who need documentation.
+
+**Install (optional):**
+```bash
+# npm
+npm install strapi-swagger-custom-paths
+
+# yarn
+yarn add strapi-swagger-custom-paths
+
+# bun
+bun add strapi-swagger-custom-paths
+```
+
+**1. Define Swagger in your custom route** — use `01-custom.ts` (or `01-custom.js`) so the package can discover it. Add `config.swagger` to each route:
+
+**`src/api/my-content-type/routes/01-custom.ts`:**
+```ts
+export default {
+  routes: [
+    {
+      method: 'POST',
+      path: '/my-content-types/upload',
+      handler: 'my-content-type.upload',
+      config: {
+        tags: ['My content type'],
+        swagger: {
+          tags: ['My content type'],
+          summary: 'Upload file',
+          description: 'Upload a file with path, pathDir (strapi-provider-upload-local-secure).',
+          requestBody: {
+            required: true,
+            content: {
+              'multipart/form-data': {
+                schema: {
+                  type: 'object',
+                  required: ['file'],
+                  properties: {
+                    file: {
+                      type: 'string',
+                      format: 'binary',
+                      description: 'File to upload',
+                    },
+                    // Add custom fields here (if necessary)
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  ],
+};
+```
+
+**2. Use `getCustomSwaggerPaths()` in your documentation plugin** — the package scans all `01-custom.js`/`01-custom.ts` files and merges their `config.swagger` into OpenAPI paths:
+
+**TypeScript** (`config/plugins.ts`):
+```ts
+import { getCustomSwaggerPaths } from 'strapi-swagger-custom-paths';
+
+export default () => ({
+  // ... your other plugins
+  documentation: {
+    enabled: true,
+    config: {
+      'x-strapi-config': { path: '/documentation' },
+      paths: getCustomSwaggerPaths(),
+    },
+  },
+});
+```
+
+**JavaScript** (`config/plugins.js`):
+```js
+const { getCustomSwaggerPaths } = require('strapi-swagger-custom-paths');
+
+module.exports = () => ({
+  documentation: {
+    enabled: true,
+    config: {
+      'x-strapi-config': { path: '/documentation' },
+      paths: getCustomSwaggerPaths(),
+    },
+  },
+});
+```
+
+The upload provider and the Swagger package work independently: you can use either one without the other.
+
 ### Basic Usage (Backward Compatible)
+
+All examples below use `api::my-content-type.my-content-type`. Replace with your own API. Ensure `entry` exists (create it first or get from request); use `entry.documentId` for refId.
 
 **TypeScript:**
 ```ts
@@ -182,14 +260,15 @@ async upload(ctx) {
     if (!files?.file) return ctx.badRequest('No file uploaded');
 
     const file = Array.isArray(files.file) ? files.file[0] : files.file;
+    const entry = await strapi.documents('api::my-content-type.my-content-type').create({ data: {} });
 
     const result = await strapi.plugin('upload').service('upload').upload({
       data: {
         path: 'custom-folder',
         pathDir: 'custom-folder',
-        ref: 'api::documents.documents',
-        refId: document.id,
-        field: 'documentFile',
+        ref: 'api::my-content-type.my-content-type',
+        refId: entry.id,
+        field: 'file',
         fileInfo: {
           name: file.originalFilename,
           caption: 'Document file',
@@ -215,14 +294,15 @@ async upload(ctx) {
     if (!files?.file) return ctx.badRequest('No file uploaded');
 
     const file = Array.isArray(files.file) ? files.file[0] : files.file;
+    const entry = await strapi.documents('api::my-content-type.my-content-type').create({ data: {} });
 
     const result = await strapi.plugin('upload').service('upload').upload({
       data: {
         path: 'custom-folder',
         pathDir: 'custom-folder',
-        ref: 'api::documents.documents',
-        refId: document.id,
-        field: 'documentFile',
+        ref: 'api::my-content-type.my-content-type',
+        refId: entry.id,
+        field: 'file',
         fileInfo: {
           name: file.originalFilename,
           caption: 'Document file',
@@ -239,11 +319,7 @@ async upload(ctx) {
 
 ### Dynamic Path Organization
 
-Use:
-- `path`: to organize in the **Admin (Media Library)** (creates the folder hierarchy if needed)
-- `pathDir`: to organize in the **filesystem** (subdirectories under `public/uploads`)
-
-If `pathDir` is not provided, the provider also uses `path` as the physical directory (compatibility).
+Use `path` for Admin folders and `pathDir` for filesystem subdirectories. See [path vs pathDir](#path-admin-vs-pathdir-filesystem) in Configuration Options for details.
 
 **TypeScript:**
 ```ts
@@ -251,9 +327,9 @@ const result = await strapi.plugin('upload').service('upload').upload({
   data: {
     path: `user-${userId}`,
     pathDir: `user-${userId}`,
-    ref: 'api::documents.documents',
-    refId: document.id,
-    field: 'documentFile',
+    ref: 'api::my-content-type.my-content-type',
+    refId: entry.id,
+    field: 'file',
     fileInfo: {
       name: file.originalFilename,
       caption: `Document for user ${userId}`,
@@ -272,9 +348,9 @@ const result = await strapi.plugin('upload').service('upload').upload({
   data: {
     path: `user-${userId}`,
     pathDir: `user-${userId}`,
-    ref: 'api::documents.documents',
-    refId: document.id,
-    field: 'documentFile',
+    ref: 'api::my-content-type.my-content-type',
+    refId: entry.id,
+    field: 'file',
     fileInfo: {
       name: file.originalFilename,
       caption: `Document for user ${userId}`,
@@ -306,9 +382,9 @@ const result = await strapi.plugin('upload').service('upload').upload({
   data: {
     pathDir: documentId,
     private: true,
-    ref: 'api::documents.documents',
-    refId: document.id,
-    field: 'documentFile',
+    ref: 'api::my-content-type.my-content-type',
+    refId: entry.id,
+    field: 'file',
     fileInfo: {
       name: file.originalFilename,
       caption: 'Private file',
@@ -332,9 +408,9 @@ const result = await strapi.plugin('upload').service('upload').upload({
   data: {
     pathDir: documentId,
     private: true,
-    ref: 'api::documents.documents',
-    refId: document.id,
-    field: 'documentFile',
+    ref: 'api::my-content-type.my-content-type',
+    refId: entry.id,
+    field: 'file',
     fileInfo: {
       name: file.originalFilename,
       caption: 'Private file',
@@ -423,9 +499,9 @@ const result = await strapi.plugin('upload').service('upload').upload({
   data: {
     path: `contracts/${userId}`,
     pathDir: `contracts/${userId}`,
-    ref: 'api::contracts.contracts',
-    refId: contract.id,
-    field: 'contractFile',
+    ref: 'api::my-content-type.my-content-type',
+    refId: entry.id,
+    field: 'file',
     fileInfo: {
       name: file.originalFilename,
       caption: 'Contract document',
@@ -443,9 +519,9 @@ const result = await strapi.plugin('upload').service('upload').upload({
   data: {
     path: `contracts/${userId}`,
     pathDir: `contracts/${userId}`,
-    ref: 'api::contracts.contracts',
-    refId: contract.id,
-    field: 'contractFile',
+    ref: 'api::my-content-type.my-content-type',
+    refId: entry.id,
+    field: 'file',
     fileInfo: {
       name: file.originalFilename,
       caption: 'Contract document',
@@ -491,44 +567,9 @@ This provider supports two optional fields in `upload().data`:
 - **`path`**: creates/targets a **Media Library folder** (Admin UI) by automatically setting `fileInfo.folder` (it creates the folder hierarchy if needed).
 - **`pathDir`**: controls the **physical directory** under `public/uploads` (NFD normalized + sanitized) and therefore affects the final `file.url`.
 
-**Compatibility**:
-- If you do **not** send `pathDir`, the provider uses `path` as filesystem directory by default (can be changed with `usePathAsPathDir`).
+**Compatibility**: If you do **not** send `pathDir`, the provider uses `path` as filesystem directory by default (can be changed with `usePathAsPathDir`).
 
-**TypeScript:**
-```ts
-await strapi.plugin('upload').service('upload').upload({
-  data: {
-    path: 'custom-folder',
-    pathDir: 'custom-folder',
-    ref: 'api::documents.documents',
-    refId: document.id,
-    field: 'documentFile',
-    fileInfo: {
-      name: file.originalFilename,
-      caption: 'Document file',
-    },
-  },
-  files: file,
-});
-```
-
-**JavaScript:**
-```js
-await strapi.plugin('upload').service('upload').upload({
-  data: {
-    path: 'custom-folder',
-    pathDir: 'custom-folder',
-    ref: 'api::documents.documents',
-    refId: document.id,
-    field: 'documentFile',
-    fileInfo: {
-      name: file.originalFilename,
-      caption: 'Document file',
-    },
-  },
-  files: file,
-});
-```
+See [Basic Usage](#basic-usage-backward-compatible) or [Dynamic Path Organization](#dynamic-path-organization) for code examples.
 
 ### Provider options (`providerOptions`)
 
@@ -607,26 +648,17 @@ This is a **drop-in replacement** for `@strapi/provider-upload-local`. To migrat
 
 1. **Install the new package**:
    ```bash
+   # npm
    npm install strapi-provider-upload-local-secure
+
+   # yarn
+   yarn add strapi-provider-upload-local-secure
+
+   # bun
+   bun add strapi-provider-upload-local-secure
    ```
 
-2. **Update plugins configuration**:
-
-   **TypeScript** (`config/plugins.ts`):
-   ```ts
-   // Change from:
-   provider: 'local'
-   // To:
-   provider: 'strapi-provider-upload-local-secure'
-   ```
-
-   **JavaScript** (`config/plugins.js`):
-   ```js
-   // Change from:
-   provider: 'local'
-   // To:
-   provider: 'strapi-provider-upload-local-secure'
-   ```
+2. **Update plugins configuration** (`config/plugins.ts` or `config/plugins.js`): change `provider: 'local'` to `provider: 'strapi-provider-upload-local-secure'`.
 
 3. **Add dynamic paths** (optional): call the upload service from your controller or custom route and pass `path` / `pathDir` in `data`:
 
@@ -729,4 +761,4 @@ This provider was inspired by:
 
 ---
 
-**⚠️ Important**: This is a **modified version** of the official Strapi provider. While it maintains backward compatibility, it adds additional features not present in the original implementation.
+**⚠️ Important**: Modified version of the official `@strapi/provider-upload-local`. Backward compatible; adds path organization, private folder with secure URLs, and other features not in the original.

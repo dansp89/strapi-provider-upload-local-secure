@@ -65,6 +65,7 @@ $RECYCLE.BIN/
 *.log
 *.sql
 *.sqlite
+commit.json
 
 ############################
 # Misc.
